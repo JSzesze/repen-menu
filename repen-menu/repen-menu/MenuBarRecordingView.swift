@@ -1,0 +1,149 @@
+import SwiftUI
+import AppKit
+import Combine
+
+/// A custom view for the menu bar that shows a waveform and timer when recording
+final class MenuBarRecordingView: NSView {
+    private var audioLevelSubscription: AnyCancellable?
+    private var elapsedSubscription: AnyCancellable?
+    private var isRecordingSubscription: AnyCancellable?
+    
+    private var audioLevel: Double = 0
+    private var elapsedSeconds: Double = 0
+    private var isRecording: Bool = false
+    
+    private let waveformBarCount = 5
+    private let barWidth: CGFloat = 2
+    private let barSpacing: CGFloat = 1
+    private let maxBarHeight: CGFloat = 12
+    private let minBarHeight: CGFloat = 3
+    
+    override var intrinsicContentSize: NSSize {
+        if isRecording {
+            // Waveform + spacing + time label width
+            let waveformWidth = CGFloat(waveformBarCount) * (barWidth + barSpacing)
+            return NSSize(width: waveformWidth + 40, height: 22)
+        } else {
+            // Just the icon
+            return NSSize(width: 22, height: 22)
+        }
+    }
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupSubscriptions()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupSubscriptions()
+    }
+    
+    private func setupSubscriptions() {
+        // Subscribe to audio level changes
+        audioLevelSubscription = AudioRecorder.shared.$audioLevel
+            .receive(on: RunLoop.main)
+            .sink { [weak self] level in
+                self?.audioLevel = level
+                if self?.isRecording == true {
+                    self?.needsDisplay = true
+                }
+            }
+        
+        // Subscribe to elapsed time changes
+        elapsedSubscription = AudioRecorder.shared.$elapsedSeconds
+            .receive(on: RunLoop.main)
+            .sink { [weak self] elapsed in
+                self?.elapsedSeconds = elapsed
+                if self?.isRecording == true {
+                    self?.needsDisplay = true
+                }
+            }
+        
+        // Subscribe to recording state
+        isRecordingSubscription = AudioRecorder.shared.$isRecording
+            .receive(on: RunLoop.main)
+            .sink { [weak self] recording in
+                self?.isRecording = recording
+                self?.invalidateIntrinsicContentSize()
+                self?.needsDisplay = true
+            }
+    }
+    
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        
+        // Use bounds for consistent positioning
+        let rect = self.bounds
+        
+        if isRecording {
+            drawRecordingState(in: rect)
+        } else {
+            drawIdleState(in: rect)
+        }
+    }
+    
+    private func drawIdleState(in rect: NSRect) {
+        // Draw mic icon with proper menu bar coloring
+        guard let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Recorder") else { return }
+        
+        // Create a configuration with the menu bar color (adapts to light/dark)
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.labelColor]))
+        
+        guard let coloredImage = image.withSymbolConfiguration(config) else { return }
+        
+        let imageSize: CGFloat = 16
+        let imageRect = NSRect(x: (rect.width - imageSize) / 2, 
+                               y: (rect.height - imageSize) / 2, 
+                               width: imageSize, 
+                               height: imageSize)
+        coloredImage.draw(in: imageRect)
+    }
+    
+    private func drawRecordingState(in rect: NSRect) {
+        // Draw recording dot
+        NSColor.systemRed.setFill()
+        let dotRect = NSRect(x: 2, y: (rect.height - 6) / 2, width: 6, height: 6)
+        let dotPath = NSBezierPath(ovalIn: dotRect)
+        dotPath.fill()
+        
+        // Draw waveform bars
+        let waveformStartX: CGFloat = 10
+        let baseLevel = max(0.02, audioLevel) // Minimum visible level
+        
+        for i in 0..<waveformBarCount {
+            // Vary each bar slightly for visual interest
+            let variation = sin(Double(i) * 0.8 + elapsedSeconds * 3) * 0.3 + 0.7
+            let height = min(maxBarHeight, max(minBarHeight, CGFloat(baseLevel * 80 * variation)))
+            
+            let x = waveformStartX + CGFloat(i) * (barWidth + barSpacing)
+            let y = (rect.height - height) / 2
+            
+            let barRect = NSRect(x: x, y: y, width: barWidth, height: height)
+            let barPath = NSBezierPath(roundedRect: barRect, xRadius: 1, yRadius: 1)
+            
+            NSColor.systemRed.setFill()
+            barPath.fill()
+        }
+        
+        // Draw elapsed time
+        let timeString = formatTime(elapsedSeconds)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: NSColor.labelColor
+        ]
+        
+        let timeRect = NSRect(x: waveformStartX + CGFloat(waveformBarCount) * (barWidth + barSpacing) + 4,
+                              y: (rect.height - 12) / 2,
+                              width: 35,
+                              height: 12)
+        timeString.draw(in: timeRect, withAttributes: attributes)
+    }
+    
+    private func formatTime(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+}
