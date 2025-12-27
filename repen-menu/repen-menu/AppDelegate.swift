@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showInDock = UserDefaults.standard.bool(forKey: "showInDock")
         NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
         
+        // Start Global Hotkey Manager
+        HotKeyManager.shared.start()
+        
         // Create status item with variable length to accommodate waveform
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
@@ -32,21 +35,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             
             button.action = #selector(togglePopover(_:))
             button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 320, height: 450)
+        popover.contentSize = NSSize(width: 260, height: 200) // Updated size estimation
         popover.contentViewController = NSHostingController(rootView: MenuPopoverView())
     }
 
     @objc private func togglePopover(_ sender: Any?) {
         guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(sender)
+        
+        let event = NSApp.currentEvent
+        
+        if event?.type == .rightMouseUp {
+            // Show Context Menu
+            let menu = NSMenu()
+            
+            menu.addItem(withTitle: "Open Repen", action: #selector(openMainWindow), keyEquivalent: "")
+            menu.addItem(withTitle: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+            
+            statusItem.menu = menu // Temporarily attach menu
+            statusItem.button?.performClick(nil) // Trigger menu
+            statusItem.menu = nil // Detach immediately to keep custom behavior
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
+            // Show/Hide Popover
+            if popover.isShown {
+                popover.performClose(sender)
+            } else {
+                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                popover.contentViewController?.view.window?.makeKey() // Ensure window is key
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
+    }
+    
+    @objc private func openMainWindow() {
+        MainWindowController.shared.showWindow()
+    }
+    
+    @objc private func openSettings() {
+        // Placeholder for settings
+        MainWindowController.shared.showWindow()
+        // Ideally navigate to settings tab if it exists
+    }
+    
+    @objc private func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

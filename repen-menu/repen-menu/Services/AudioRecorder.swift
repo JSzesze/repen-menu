@@ -287,6 +287,14 @@ final class AudioRecorder: ObservableObject {
             currentDocument = nil
         }
     }
+    
+    func toggleRecording() async {
+        if isRecording {
+            await stopRecording()
+        } else {
+            await startRecording()
+        }
+    }
 
     private func startTimer() {
         timerCancellable?.cancel()
