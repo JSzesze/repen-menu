@@ -27,9 +27,8 @@ final class AudioRecorder: ObservableObject {
     @Published var lastTranscript: String?
     @Published var audioLevel: Double = 0.0
     @Published var elapsedSeconds: Double = 0.0
-    @Published var recordedURLs: [URL] = []
     @Published var recordingSource: RecordingSource = .mic
-    @Published var currentRecordingURL: URL?  // Final destination path for active recording
+    @Published var currentDocument: Document?  // Active recording document
 
     private var startDate: Date?
     private var timerCancellable: AnyCancellable?
@@ -44,9 +43,7 @@ final class AudioRecorder: ObservableObject {
     private var fileURL: URL?
     private let writeQueue = DispatchQueue(label: "AudioRecorder.write", qos: .userInitiated)
 
-    init() {
-        refreshRecordings()
-    }
+    init() {}
 
     func requestPermissions() async -> Bool {
         // Microphone permission
@@ -76,10 +73,11 @@ final class AudioRecorder: ObservableObject {
             let url = tmp.appendingPathComponent(name)
             fileURL = url
             
-            // Generate final destination path and create notes file immediately
-            let finalURL = try createRecordingEntry()
-            currentRecordingURL = finalURL
-            refreshRecordings()
+            // Use existing document or create new one
+            if currentDocument == nil {
+                let doc = DocumentStore.shared.createDocumentForRecording()
+                currentDocument = doc
+            }
             
             if recordingSource == .mic {
                 // High Quality Format: 48kHz, 2CH, 32-bit Float
@@ -261,19 +259,23 @@ final class AudioRecorder: ObservableObject {
         audioLevel = 0.0
         statusMessage = "Finalizing..."
 
-        guard let tempURL = fileURL, let finalURL = currentRecordingURL else { return }
+        guard let tempURL = fileURL, let doc = currentDocument else { return }
         audioFile = nil
 
         do {
-            // Move temp audio to the pre-created final destination
+            // Move temp audio to the document's audio location
+            let finalURL = doc.audioURL(in: DocumentStore.shared.folderURL)
             let fm = FileManager.default
             if fm.fileExists(atPath: finalURL.path) {
                 try fm.removeItem(at: finalURL)
             }
             try fm.moveItem(at: tempURL, to: finalURL)
             
-            currentRecordingURL = nil
-            refreshRecordings()
+            // Update document flags
+            DocumentStore.shared.updateFlags(for: doc)
+            DocumentStore.shared.refresh()
+            
+            currentDocument = nil
             statusMessage = "Ready"
             
             Task { @MainActor in
@@ -282,36 +284,8 @@ final class AudioRecorder: ObservableObject {
             }
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
-            currentRecordingURL = nil
+            currentDocument = nil
         }
-    }
-
-    func refreshRecordings() {
-        do {
-            let fm = FileManager.default
-            let docs = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let folder = docs.appendingPathComponent("Repen Menu/Recordings", isDirectory: true)
-            
-            if fm.fileExists(atPath: folder.path) {
-                let allFiles = try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles)
-                
-                // Build set of unique base names (without extension)
-                var uniqueBases = Set<URL>()
-                for file in allFiles {
-                    let base = file.deletingPathExtension()
-                    uniqueBases.insert(base)
-                }
-                
-                // Convert bases to .wav URLs (even if .wav doesn't exist yet)
-                let urls = uniqueBases.map { $0.appendingPathExtension("wav") }
-                
-                recordedURLs = urls.sorted { (u1, u2) -> Bool in
-                    let d1 = (try? u1.deletingPathExtension().appendingPathExtension("notes").resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
-                    let d2 = (try? u2.deletingPathExtension().appendingPathExtension("notes").resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
-                    return d1 > d2
-                }
-            }
-        } catch { print("Refresh error: \(error)") }
     }
 
     private func startTimer() {
@@ -327,43 +301,6 @@ final class AudioRecorder: ObservableObject {
     private func stopTimer() {
         timerCancellable?.cancel()
         timerCancellable = nil
-    }
-    
-    /// Creates the recording entry (final path + notes file) before recording starts
-    private func createRecordingEntry() throws -> URL {
-        let fm = FileManager.default
-        let docs = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let folder = docs.appendingPathComponent("Repen Menu/Recordings", isDirectory: true)
-        if !fm.fileExists(atPath: folder.path) {
-            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        }
-        
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        let filename = "Recording_\(formatter.string(from: Date())).wav"
-        let audioURL = folder.appendingPathComponent(filename)
-        
-        // Create empty notes file so entry appears in list
-        let notesURL = audioURL.deletingPathExtension().appendingPathExtension("notes")
-        try "".write(to: notesURL, atomically: true, encoding: .utf8)
-        
-        return audioURL
-    }
-
-    private func saveToDocuments(tempURL: URL) throws -> URL {
-        let fm = FileManager.default
-        let docs = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let folder = docs.appendingPathComponent("Repen Menu/Recordings", isDirectory: true)
-        if !fm.fileExists(atPath: folder.path) {
-            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        let filename = "Recording_\(formatter.string(from: Date())).wav"
-        let dest = folder.appendingPathComponent(filename)
-        if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
-        try fm.moveItem(at: tempURL, to: dest)
-        return dest
     }
 
     var elapsedDisplay: String {

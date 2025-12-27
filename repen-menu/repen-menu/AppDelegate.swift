@@ -8,7 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarView: MenuBarRecordingView!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // Register defaults (for first launch)
+        UserDefaults.standard.register(defaults: ["showInDock": true])
+        
+        let showInDock = UserDefaults.standard.bool(forKey: "showInDock")
+        NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
         
         // Create status item with variable length to accommodate waveform
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -43,5 +47,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            MainWindowController.shared.showWindow()
+        }
+        return true
     }
 }

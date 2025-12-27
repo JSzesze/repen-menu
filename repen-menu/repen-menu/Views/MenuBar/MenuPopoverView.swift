@@ -82,7 +82,7 @@ struct MenuPopoverView: View {
     private var footer: some View {
         HStack {
             Button(action: { 
-                HistoryWindowController.shared.showWindow()
+                MainWindowController.shared.showWindow()
             }) { 
                 Label("Open Repen", systemImage: "rectangle.on.rectangle")
                     .font(.caption)

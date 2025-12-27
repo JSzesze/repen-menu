@@ -38,7 +38,7 @@ actor OpenAIService {
     private init() {}
     
     /// Summarize a transcript using OpenAI
-    func summarize(transcript: String) async -> SummaryResult {
+    func summarize(transcript: String, documentTitle: String, date: Date) async -> SummaryResult {
         let config = await MainActor.run { OpenAIConfiguration.load() }
         
         guard config.isConfigured else {
@@ -57,6 +57,11 @@ actor OpenAIService {
             )
         }
         
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .short
+        let dateString = formatter.string(from: date)
+        
         do {
             let url = URL(string: "https://api.openai.com/v1/chat/completions")!
             
@@ -67,22 +72,45 @@ actor OpenAIService {
             request.timeoutInterval = 60
             
             let systemPrompt = """
-            You are a helpful assistant that summarizes meeting transcripts and audio recordings.
-            Provide a clear, concise summary that captures:
-            - Key topics discussed
-            - Important decisions or action items
-            - Notable quotes or statements
-            Keep the summary organized and easy to scan.
+            You are a professional meeting assistant that provides highly accurate, structured summaries of transcripts.
+            
+            TRANSCRIPT DETAILS:
+            Title: \(documentTitle)
+            Date: \(dateString)
+            
+            CRITICAL INSTRUCTIONS:
+            1. DO NOT include placeholders like "[Insert Date]", "[Insert Names]", or "[Meeting Summary]".
+            2. DO NOT start with "## AI Summary" or any variation of that header.
+            3. If you don't know the exact attendees, omit that section or list "Mentioned Participants".
+            4. Use only the Markdown structure provided below.
+            
+            STRUCTURE:
+            # [Create a better title if the current one is generic]
+            
+            ## Overview
+            2-3 sentence executive summary.
+            
+            ## Key Discussion Points
+            - Broad topics and specific decisions
+            - Use bullet points
+            
+            ## Action Items & Next Steps
+            - Tasks assigned to specific people (if mentioned)
+            - Deadlines or milestones
+            
+            ## Notable Quotes
+            > "Full quote here" - Speaker (if known)
+            
+            Format everything in clean Markdown. Be concise and professional.
             """
             
             let body: [String: Any] = [
                 "model": "gpt-4o-mini",
                 "messages": [
                     ["role": "system", "content": systemPrompt],
-                    ["role": "user", "content": "Please summarize this transcript:\n\n\(transcript)"]
+                    ["role": "user", "content": "Transcript to summarize:\n\n\(transcript)"]
                 ],
-                "max_tokens": 1000,
-                "temperature": 0.5
+                "temperature": 0.3
             ]
             
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
